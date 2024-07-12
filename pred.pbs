@@ -1,0 +1,108 @@
+#!/bin/bash
+ 
+#PBS -P yi98
+#PBS -q normal
+#PBS -l ncpus=12
+#PBS -l mem=64gb
+#PBS -l walltime=10:00:00
+#PBS -l storage=gdata/yi98+gdata/if89
+#PBS -l iointensive=4
+#PBS -l jobfs=200GB
+ 
+module load singularity
+
+#set this to the directory where your sequences are. Fasta files only
+INPUT_DIR=$HOME/predpipe_cpu_fix/input
+#set this to the directory you want results output
+OUTPUT_DIR=$HOME/predpipe_cpu_fix/output
+
+
+
+CONTAINER_IMAGE_PATH=/g/data/yi98/singularityimages/alphafold-hhcpu.sif
+
+DATABASE_DIR=/iointensive/alphafold2_dbs
+DATA_DIR=/iointensive/alphafold_params
+UNIREF90_DIR=${DATABASE_DIR}/uniref90
+MGNIFY_DIR=${DATABASE_DIR}/mgnify
+BFD_DIR=${DATABASE_DIR}/bfd
+UNIREF30_DIR=${DATABASE_DIR}/uniref30
+PDB70_DIR=${DATABASE_DIR}/pdb70
+MMCIF_DIR=/iointensive/pdb_mmcif
+MMCIF_OBSOLETE_FILE=${MMCIF_DIR}/obsolete.dat
+
+
+NET_DATABASE_DIR=/g/data/if89/proteinfold_dbs/alphafold2_dbs
+NET_DATA_DIR=/g/data/yi98/alphafold_params
+NET_UNIREF90_DIR=${NET_DATABASE_DIR}/uniref90
+NET_MGNIFY_DIR=${NET_DATABASE_DIR}/mgnify
+NET_BFD_DIR=${NET_DATABASE_DIR}/bfd
+NET_UNIREF30_DIR=${NET_DATABASE_DIR}/uniref30
+NET_PDB70_DIR=/g/data/yi98/alphafold_data/pdb70
+NET_MMCIF_ARCHIVE=/g/data/yi98/mmcif_archive.tar.gz
+NET_MMCIF_OBSOLETE_FILE=/g/data/if89/proteinfold_dbs/alphafold2_dbs/pdb_mmcif/obsolete.dat
+
+
+#construct sequence argument
+sequence_paths=""
+for file in "$INPUT_DIR"/*; do
+    echo adding $file
+    sequence_paths="${sequence_paths}${file},"
+done
+# Remove the trailing comma
+sequence_paths=${sequence_paths%,}
+
+echo $sequence_paths > ${OUTPUT_DIR}/sequence_paths.txt
+
+mkdir -p ${DATABASE_DIR} || { exit 1; }
+echo copying params
+date
+cp -r ${NET_DATA_DIR} ${DATA_DIR} || { exit 1; }
+echo copying uniref90
+date
+cp -r ${NET_UNIREF90_DIR} ${UNIREF90_DIR} || { exit 1; }
+echo copying mgnify
+date
+cp -r ${NET_MGNIFY_DIR} ${MGNIFY_DIR} || { exit 1; }
+echo copying bfd
+date
+cp -r ${NET_BFD_DIR} ${BFD_DIR} || { exit 1; }
+echo copying uniref30
+date
+cp -r ${NET_UNIREF30_DIR} ${UNIREF30_DIR} || { exit 1; }
+echo copying pdb70
+date
+cp -r ${NET_PDB70_DIR} ${PDB70_DIR} || { exit 1; }
+echo copying mmcif archive
+date
+mkdir -p ${MMCIF_DIR} || { exit 1; }
+cp ${NET_MMCIF_ARCHIVE} ${MMCIF_DIR}/mmcif_archive.tar.gz || { exit 1; }
+echo extracting archive
+date
+#strip-components necessary becuase the archive has unwanted directory structure!
+tar --strip-components=3 -xzf ${MMCIF_DIR}/mmcif_archive.tar.gz -C ${MMCIF_DIR} || { exit 1; }
+echo copying obsolete.dat
+date
+cp ${NET_MMCIF_OBSOLETE_FILE} ${MMCIF_OBSOLETE_FILE} || { exit 1; }
+echo starting container..
+date
+
+
+
+
+singularity exec \
+--bind /iointensive:/iointensive \
+$CONTAINER_IMAGE_PATH python /app/alphafold/run_data_pipeline.py \
+--data_dir=$DATA_DIR \
+--uniref90_database_path=${UNIREF90_DIR}/uniref90.fasta \
+--mgnify_database_path=${MGNIFY_DIR}/mgy_clusters_2018_12.fa \
+--bfd_database_path=${BFD_DIR}/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt \
+--uniref30_database_path=${UNIREF30_DIR}/UniRef30_2021_03 \
+--pdb70_database_path=${PDB70_DIR}/pdb70 \
+--template_mmcif_dir=${MMCIF_DIR}/mmcif_files \
+--obsolete_pdbs_path=${MMCIF_OBSOLETE_FILE} \
+--model_preset=monomer \
+--max_template_date=2022-1-1 \
+--db_preset=full_dbs \
+--output_dir=$OUTPUT_DIR \
+--fasta_paths=$sequence_paths \
+--use_gpu_relax=FALSE
